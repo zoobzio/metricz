@@ -275,7 +275,10 @@ func BenchmarkStress_GoroutineLeakDetection(b *testing.B) {
 	b.StopTimer()
 
 	// Allow time for any goroutines to clean up.
-	time.Sleep(10 * time.Millisecond)
+	// Use runtime.Gosched() for deterministic goroutine scheduling
+	for i := 0; i < 100; i++ {
+		runtime.Gosched()
+	}
 	runtime.GC()
 
 	finalGoroutines := runtime.NumGoroutine()
@@ -315,6 +318,7 @@ func BenchmarkStress_LongRunningStability(b *testing.B) {
 		b.Skip("Skipping long-running stability test in short mode")
 	}
 
+	// Use real clock for accurate benchmark performance measurement
 	registry := metricz.New()
 	buckets := []float64{0.01, 0.1, 1.0, 10.0}
 
@@ -367,6 +371,7 @@ func BenchmarkStress_LongRunningStability(b *testing.B) {
 
 // BenchmarkStress_AtomicContentionBreakingPoint finds the breaking point for atomic operations.
 func BenchmarkStress_AtomicContentionBreakingPoint(b *testing.B) {
+	// Use real clock for accurate benchmark performance measurement
 	registry := metricz.New()
 	counter := registry.Counter(StressCounterKey)
 

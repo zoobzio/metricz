@@ -2,8 +2,8 @@ package benchmarks
 
 import (
 	"math/rand"
+	"runtime"
 	"testing"
-	"time"
 
 	"github.com/zoobzio/metricz"
 )
@@ -218,10 +218,12 @@ func BenchmarkRealisticMixedLoad(b *testing.B) {
 				activeConnections.Inc()
 
 				stopwatch := httpLatency.Start()
-				// Simulate varying response times.
+				// Simulate varying response times deterministically.
 				if rand.Float64() < 0.1 {
-					// 10% slow requests.
-					time.Sleep(time.Microsecond * 10)
+					// 10% slow requests - use Gosched for deterministic timing simulation.
+					for i := 0; i < 10; i++ {
+						runtime.Gosched()
+					}
 				}
 				stopwatch.Stop()
 

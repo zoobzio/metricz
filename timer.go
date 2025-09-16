@@ -2,6 +2,8 @@ package metricz
 
 import (
 	"time"
+
+	"github.com/zoobzio/clockz"
 )
 
 // Timer interface for timing metrics.
@@ -17,19 +19,24 @@ type Timer interface {
 // timer implements Timer as a duration histogram.
 type timer struct {
 	histogram *histogram
+	clock     clockz.Clock
 }
 
 // newTimer creates a new timer with default latency buckets.
-func newTimer() *timer {
+// Uses the provided clock for all timing operations.
+func newTimer(clock clockz.Clock) *timer {
 	return &timer{
 		histogram: newHistogram(DefaultLatencyBuckets),
+		clock:     clock,
 	}
 }
 
 // newTimerWithBuckets creates a new timer with custom buckets.
-func newTimerWithBuckets(buckets []float64) *timer {
+// Uses the provided clock for all timing operations.
+func newTimerWithBuckets(buckets []float64, clock clockz.Clock) *timer {
 	return &timer{
 		histogram: newHistogram(buckets),
+		clock:     clock,
 	}
 }
 
@@ -40,9 +47,10 @@ func (t *timer) Record(duration time.Duration) {
 }
 
 // Start returns a stopwatch for timing operations.
+// Uses injected clock for deterministic timing.
 func (t *timer) Start() *Stopwatch {
 	return &Stopwatch{
-		start: time.Now(),
+		start: t.clock.Now(),
 		timer: t,
 	}
 }
@@ -69,6 +77,7 @@ type Stopwatch struct {
 }
 
 // Stop records the elapsed time since Start().
+// Uses injected clock for deterministic timing.
 func (s *Stopwatch) Stop() {
-	s.timer.Record(time.Since(s.start))
+	s.timer.Record(s.timer.clock.Now().Sub(s.start))
 }

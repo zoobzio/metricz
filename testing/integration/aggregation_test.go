@@ -7,6 +7,7 @@ import (
 	gotesting "testing"
 	"time"
 
+	"github.com/zoobzio/clockz"
 	"github.com/zoobzio/metricz"
 	"github.com/zoobzio/metricz/testing"
 )
@@ -197,7 +198,9 @@ func TestPercentileAggregation(t *gotesting.T) {
 
 // TestRollingWindowAggregation demonstrates time-based metric aggregation.
 func TestRollingWindowAggregation(t *gotesting.T) {
-	registry := metricz.New()
+	// Use fake clock for deterministic timing
+	clock := clockz.NewFakeClock()
+	registry := metricz.New().WithClock(clock)
 
 	// Sliding window for rate calculation
 	type window struct {
@@ -220,7 +223,7 @@ func TestRollingWindowAggregation(t *gotesting.T) {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 
-		now := time.Now()
+		now := clock.Now()
 		w.samples = append(w.samples, value)
 		w.times = append(w.times, now)
 
@@ -265,35 +268,41 @@ func TestRollingWindowAggregation(t *gotesting.T) {
 	// Track request rate over 100ms window
 	requestWindow := newWindow(100 * time.Millisecond)
 
-	// Generate traffic with varying rate
-	go func() {
-		// Burst of traffic
-		for i := 0; i < 50; i++ {
-			registry.Counter(RequestsKey).Inc()
-			addSample(requestWindow, 1)
-			time.Sleep(2 * time.Millisecond)
-		}
+	// Generate initial traffic burst
+	for i := 0; i < 50; i++ {
+		registry.Counter(RequestsKey).Inc()
+		addSample(requestWindow, 1)
+		clock.Advance(2 * time.Millisecond)
+	}
 
-		// Slow period
-		time.Sleep(50 * time.Millisecond)
+	// Slow period
+	clock.Advance(50 * time.Millisecond)
 
-		// Another burst
-		for i := 0; i < 30; i++ {
-			registry.Counter(RequestsKey).Inc()
-			addSample(requestWindow, 1)
-			time.Sleep(1 * time.Millisecond)
-		}
-	}()
+	// Another burst
+	for i := 0; i < 30; i++ {
+		registry.Counter(RequestsKey).Inc()
+		addSample(requestWindow, 1)
+		clock.Advance(1 * time.Millisecond)
+	}
 
-	// Monitor rate over time
-	ticker := time.NewTicker(20 * time.Millisecond)
+	// Monitor rate over time with incremental ticker advances
+	ticker := clock.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 
 	var maxRate float64
 	samples := 0
 
+	// Give ticker time to initialize
+	time.Sleep(1 * time.Millisecond)
+
 	for samples < 10 {
-		<-ticker.C
+		// Advance time to trigger ticker event
+		clock.Advance(20 * time.Millisecond)
+		clock.BlockUntilReady()
+
+		// Read the ticker event
+		<-ticker.C()
+
 		rate := calculateRate(requestWindow)
 		registry.Gauge(RequestRateKey).Set(rate)
 

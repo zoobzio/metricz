@@ -3,6 +3,7 @@ package testing
 import (
 	"testing"
 
+	"github.com/zoobzio/clockz"
 	"github.com/zoobzio/metricz"
 )
 
@@ -11,6 +12,16 @@ import (
 // preventing test contamination from lingering metric state.
 func NewTestRegistry(t *testing.T) *metricz.Registry {
 	r := metricz.New()
+	t.Cleanup(func() {
+		r.Reset()
+	})
+	return r
+}
+
+// NewTestRegistryWithClock creates a registry with a specific clock and automatic cleanup.
+// Used for deterministic timing tests with FakeClock.
+func NewTestRegistryWithClock(t *testing.T, clock clockz.Clock) *metricz.Registry {
+	r := metricz.New().WithClock(clock)
 	t.Cleanup(func() {
 		r.Reset()
 	})

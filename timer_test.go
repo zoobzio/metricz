@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zoobzio/clockz"
 	"github.com/zoobzio/metricz"
 	metricstesting "github.com/zoobzio/metricz/testing"
 )
@@ -64,14 +65,15 @@ func TestTimer_RecordMultiple(t *testing.T) {
 }
 
 func TestTimer_Start_Stop(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	clock := clockz.NewFakeClock()
+	registry := metricstesting.NewTestRegistryWithClock(t, clock)
 	timer := registry.Timer(TestTimerKey)
 
 	// Start timing
 	stopwatch := timer.Start()
 
-	// Simulate some work
-	time.Sleep(10 * time.Millisecond)
+	// Advance clock by exactly 10ms
+	clock.Advance(10 * time.Millisecond)
 
 	// Stop timing
 	stopwatch.Stop()
@@ -81,15 +83,16 @@ func TestTimer_Start_Stop(t *testing.T) {
 		t.Errorf("After Start/Stop, count should be 1, got %d", timer.Count())
 	}
 
-	// Sum should be approximately 10ms (allow for timing variance)
+	// Sum should be exactly 10ms with FakeClock
 	sum := timer.Sum()
-	if sum < 5.0 || sum > 50.0 { // Allow generous range for timing variance
-		t.Errorf("Expected sum around 10ms, got %f ms", sum)
+	if sum != 10.0 {
+		t.Errorf("Expected exactly 10ms, got %f ms", sum)
 	}
 }
 
 func TestTimer_MultipleStopwatches(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	clock := clockz.NewFakeClock()
+	registry := metricstesting.NewTestRegistryWithClock(t, clock)
 	timer := registry.Timer(TestTimerKey)
 
 	const numStopwatches = 5
@@ -98,22 +101,29 @@ func TestTimer_MultipleStopwatches(t *testing.T) {
 	// Start multiple stopwatches
 	for i := range stopwatches {
 		stopwatches[i] = timer.Start()
-		time.Sleep(1 * time.Millisecond) // Stagger start times
+		clock.Advance(1 * time.Millisecond) // Stagger start times
 	}
 
 	// Stop them in reverse order
 	for i := len(stopwatches) - 1; i >= 0; i-- {
 		stopwatches[i].Stop()
-		time.Sleep(1 * time.Millisecond) // Allow time between stops
+		clock.Advance(1 * time.Millisecond) // Allow time between stops
 	}
 
 	if timer.Count() != numStopwatches {
 		t.Errorf("Expected count %d, got %d", numStopwatches, timer.Count())
 	}
 
-	// All measurements should be recorded
-	if timer.Sum() <= 0 {
-		t.Error("Timer sum should be positive after multiple measurements")
+	// Each stopwatch should record its accumulated time
+	// Stopwatch 0: started at 0ms, stopped at 9ms = 9ms
+	// Stopwatch 1: started at 1ms, stopped at 8ms = 7ms
+	// Stopwatch 2: started at 2ms, stopped at 7ms = 5ms
+	// Stopwatch 3: started at 3ms, stopped at 6ms = 3ms
+	// Stopwatch 4: started at 4ms, stopped at 5ms = 1ms
+	// Total: 9+7+5+3+1 = 25ms
+	expectedSum := 25.0
+	if timer.Sum() != expectedSum {
+		t.Errorf("Expected sum %f ms, got %f ms", expectedSum, timer.Sum())
 	}
 }
 
@@ -182,7 +192,8 @@ func TestTimer_ConcurrentRecording(t *testing.T) {
 }
 
 func TestTimer_ConcurrentStartStop(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	clock := clockz.NewFakeClock()
+	registry := metricstesting.NewTestRegistryWithClock(t, clock)
 	timer := registry.Timer(TestTimerKey)
 
 	const workers = 20
@@ -191,20 +202,24 @@ func TestTimer_ConcurrentStartStop(t *testing.T) {
 	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
 		Workers:    workers,
 		Operations: 1, // One Start/Stop per worker
-		Operation: func(_, _ int) {
+		Operation: func(workerID, _ int) {
 			stopwatch := timer.Start()
-			time.Sleep(1 * time.Millisecond)
-			stopwatch.Stop()
+			// Record a duration based on worker ID for deterministic results
+			duration := time.Duration(workerID+1) * time.Millisecond
+			timer.Record(duration)
+			// Also test Stop functionality without clock advancement
+			stopwatch.Stop() // This will record 0ms since no time elapsed
 		},
 	})
 
-	if timer.Count() != workers {
-		t.Errorf("Expected count %d, got %d", workers, timer.Count())
+	if timer.Count() != workers*2 { // Each worker records twice: once via Record, once via Stop
+		t.Errorf("Expected count %d, got %d", workers*2, timer.Count())
 	}
 
-	// All measurements should have some duration
-	if timer.Sum() <= 0 {
-		t.Error("Timer sum should be positive after concurrent start/stop")
+	// Sum should be 1+2+3+...+20 = 210ms from Record calls, plus 0ms from Stop calls
+	expectedSum := float64(workers * (workers + 1) / 2)
+	if timer.Sum() != expectedSum {
+		t.Errorf("Expected sum %f ms, got %f ms", expectedSum, timer.Sum())
 	}
 }
 
@@ -255,11 +270,12 @@ func TestTimer_ZeroDuration(t *testing.T) {
 }
 
 func TestStopwatch_MultipleStops(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	clock := clockz.NewFakeClock()
+	registry := metricstesting.NewTestRegistryWithClock(t, clock)
 	timer := registry.Timer(TestTimerKey)
 
 	stopwatch := timer.Start()
-	time.Sleep(1 * time.Millisecond)
+	clock.Advance(1 * time.Millisecond)
 
 	// First stop should record the duration
 	stopwatch.Stop()
@@ -269,23 +285,28 @@ func TestStopwatch_MultipleStops(t *testing.T) {
 	}
 
 	firstSum := timer.Sum()
+	if firstSum != 1.0 {
+		t.Errorf("First stop should record exactly 1ms, got %f ms", firstSum)
+	}
 
 	// Second stop on same stopwatch should record again
-	time.Sleep(1 * time.Millisecond)
+	clock.Advance(1 * time.Millisecond)
 	stopwatch.Stop()
 
 	if timer.Count() != 2 {
 		t.Error("Second stop should record another measurement")
 	}
 
-	// Sum should have increased
-	if timer.Sum() <= firstSum {
-		t.Error("Second stop should add to the sum")
+	// Sum should be 1ms + 2ms = 3ms (stopwatch measures from original start time)
+	expectedSum := 3.0
+	if timer.Sum() != expectedSum {
+		t.Errorf("Expected sum %f ms after second stop, got %f ms", expectedSum, timer.Sum())
 	}
 }
 
 func TestTimer_Interface(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	clock := clockz.NewFakeClock()
+	registry := metricstesting.NewTestRegistryWithClock(t, clock)
 	var tm metricz.Timer = registry.Timer(TestTimerKey)
 
 	// Test interface methods
@@ -301,11 +322,17 @@ func TestTimer_Interface(t *testing.T) {
 	}
 
 	stopwatch := tm.Start()
-	time.Sleep(1 * time.Millisecond)
+	clock.Advance(1 * time.Millisecond)
 	stopwatch.Stop()
 
 	if tm.Count() != 2 {
 		t.Error("Timer interface Start/Stop failed")
+	}
+
+	// Sum should be 100ms + 1ms = 101ms
+	expectedSum := 101.0
+	if tm.Sum() != expectedSum {
+		t.Errorf("Expected sum %f ms, got %f ms", expectedSum, tm.Sum())
 	}
 
 	buckets, counts := tm.Buckets()

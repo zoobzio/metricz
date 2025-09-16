@@ -113,6 +113,8 @@ package metricz
 
 import (
 	"sync"
+
+	"github.com/zoobzio/clockz"
 )
 
 // Key is the mandatory key type for all metric operations.
@@ -122,6 +124,7 @@ type Key string
 // Registry is the metric collection with complete instance isolation.
 // Only accepts Key type - no raw strings, no generics.
 type Registry struct {
+	clock      clockz.Clock
 	counters   map[Key]*counterImpl
 	gauges     map[Key]*gaugeImpl
 	histograms map[Key]*histogram
@@ -131,13 +134,22 @@ type Registry struct {
 
 // New creates a Registry that accepts ONLY Key types.
 // No raw strings allowed - forces explicit Key usage.
+// Uses production clock for all timing operations.
 func New() *Registry {
 	return &Registry{
+		clock:      clockz.RealClock,
 		counters:   make(map[Key]*counterImpl),
 		gauges:     make(map[Key]*gaugeImpl),
 		histograms: make(map[Key]*histogram),
 		timers:     make(map[Key]*timer),
 	}
+}
+
+// WithClock replaces the clock in this Registry and returns the Registry for chaining.
+// Primarily used for testing with fake clocks.
+func (r *Registry) WithClock(clock clockz.Clock) *Registry {
+	r.clock = clock
+	return r
 }
 
 // Counter returns a counter metric, creating it if it doesn't exist.
@@ -195,7 +207,7 @@ func (r *Registry) Timer(key Key) Timer {
 		return timer
 	}
 
-	timer := newTimer()
+	timer := newTimer(r.clock)
 	r.timers[key] = timer
 	return timer
 }
@@ -213,7 +225,7 @@ func (r *Registry) TimerWithBuckets(key Key, buckets []float64) Timer {
 		buckets = buckets[:50]
 	}
 
-	timer := newTimerWithBuckets(buckets)
+	timer := newTimerWithBuckets(buckets, r.clock)
 	r.timers[key] = timer
 	return timer
 }
