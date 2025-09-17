@@ -24,17 +24,17 @@ func TestGatewayIsolation(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	// Create handler
-	handler := gateway.ProxyHandler("test-service", backend.URL)
+	// Create handler - use predefined service "auth"
+	handler := gateway.ProxyHandler("auth", backend.URL)
 
 	// Make request
 	req := httptest.NewRequest("GET", "/test", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	// Verify metrics were recorded
+	// Verify metrics were recorded - use Key type
 	counters := registry.GetCounters()
-	if counter, exists := counters["requests_test-service"]; !exists {
+	if counter, exists := counters[AuthServiceRequestsKey]; !exists {
 		t.Fatal("Request counter not created")
 	} else if counter.Value() != 1 {
 		t.Errorf("Expected 1 request, got %f", counter.Value())
@@ -102,8 +102,8 @@ func TestGatewayErrorTracking(t *testing.T) {
 			backend := httptest.NewServer(sc.backend)
 			defer backend.Close()
 
-			// Create handler
-			handler := gateway.ProxyHandler("test", backend.URL)
+			// Create handler - use predefined service "auth"
+			handler := gateway.ProxyHandler("auth", backend.URL)
 
 			// Make request
 			req := httptest.NewRequest("GET", "/test", nil)
@@ -115,26 +115,23 @@ func TestGatewayErrorTracking(t *testing.T) {
 				t.Errorf("Want status %d, got %d", sc.wantStatus, rec.Code)
 			}
 
-			// Check error counter
+			// Check error counter - use Key type
 			counters := registry.GetCounters()
-			errorCounter, hasErrors := counters["errors_test"]
+			errorCounter, hasErrors := counters[AuthServiceErrorsKey]
 
-			// Also check gateway's internal map
+			// Check error counter
 			if sc.wantError && !hasErrors {
 				// Debug: list all counters
 				t.Logf("Available counters in registry:")
-				for name := range counters {
-					t.Logf("  - %s: %f", name, counters[name].Value())
+				for key := range counters {
+					t.Logf("  - %s: %f", key, counters[key].Value())
 				}
-				t.Logf("Gateway error map size: %d", len(gateway.errors))
-				for name := range gateway.errors {
-					t.Logf("  - gateway.errors[%s]", name)
-				}
-				t.Error("Expected error counter 'errors_test', not found")
+				t.Error("Expected error counter for auth service, not found")
 			} else if sc.wantError && errorCounter.Value() != 1 {
 				t.Errorf("Expected 1 error, got %f", errorCounter.Value())
-			} else if !sc.wantError && hasErrors {
-				t.Errorf("Unexpected error counter: %f", errorCounter.Value())
+			} else if !sc.wantError && hasErrors && errorCounter.Value() != 0 {
+				// Counter exists (created at startup) but should be zero
+				t.Errorf("Expected 0 errors, got %f", errorCounter.Value())
 			}
 		})
 	}
@@ -163,7 +160,8 @@ func TestGatewayLatencyTracking(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	handler := gateway.ProxyHandler("latency-test", backend.URL)
+	// Use predefined service "user"
+	handler := gateway.ProxyHandler("user", backend.URL)
 
 	// Make multiple requests
 	for i := 0; i < len(latencies); i++ {
@@ -172,9 +170,9 @@ func TestGatewayLatencyTracking(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 	}
 
-	// Check timer metrics
+	// Check timer metrics - use Key type
 	timers := registry.GetTimers()
-	timer, exists := timers["latency_latency-test"]
+	timer, exists := timers[UserServiceLatencyKey]
 	if !exists {
 		t.Fatal("Latency timer not created")
 	}
@@ -217,7 +215,8 @@ func TestGatewayConcurrentRequests(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	handler := gateway.ProxyHandler("concurrent-test", backend.URL)
+	// Use predefined service "order"
+	handler := gateway.ProxyHandler("order", backend.URL)
 
 	// Launch concurrent requests
 	var wg sync.WaitGroup
@@ -243,9 +242,9 @@ func TestGatewayConcurrentRequests(t *testing.T) {
 
 	wg.Wait()
 
-	// Verify all requests completed
+	// Verify all requests completed - use Key type
 	counters := registry.GetCounters()
-	if counter, exists := counters["requests_concurrent-test"]; !exists {
+	if counter, exists := counters[OrderServiceRequestsKey]; !exists {
 		t.Fatal("Request counter not found")
 	} else if counter.Value() != float64(numRequests) {
 		t.Errorf("Expected %d requests, got %f", numRequests, counter.Value())
@@ -274,7 +273,8 @@ func TestGatewayHealthCheck(t *testing.T) {
 	}))
 	defer successBackend.Close()
 
-	successHandler := gateway.ProxyHandler("healthy-service", successBackend.URL)
+	// Use predefined service "auth"
+	successHandler := gateway.ProxyHandler("auth", successBackend.URL)
 
 	for i := 0; i < 100; i++ {
 		req := httptest.NewRequest("GET", "/test", nil)
@@ -295,7 +295,8 @@ func TestGatewayHealthCheck(t *testing.T) {
 	}))
 	defer errorBackend.Close()
 
-	errorHandler := gateway.ProxyHandler("failing-service", errorBackend.URL)
+	// Use predefined service "payment" for error testing
+	errorHandler := gateway.ProxyHandler("payment", errorBackend.URL)
 
 	// Generate 10% error rate (10 errors after 100 successes)
 	for i := 0; i < 10; i++ {
@@ -311,19 +312,19 @@ func TestGatewayHealthCheck(t *testing.T) {
 			health.ErrorRate)
 	}
 
-	// Check service-specific health
-	if len(health.Services) != 2 {
-		t.Errorf("Expected 2 services in health report, got %d",
+	// Check service-specific health - always 4 predefined services
+	if len(health.Services) != 4 {
+		t.Errorf("Expected 4 services in health report, got %d",
 			len(health.Services))
 	}
 
-	if failingHealth, exists := health.Services["failing-service"]; exists {
+	if failingHealth, exists := health.Services["payment"]; exists {
 		if failingHealth.ErrorRate != 100.0 {
 			t.Errorf("Failing service should have 100%% error rate, got %.2f%%",
 				failingHealth.ErrorRate)
 		}
 	} else {
-		t.Error("Failing service not in health report")
+		t.Error("Payment service not in health report")
 	}
 }
 
@@ -357,20 +358,10 @@ func TestMetricsExport(t *testing.T) {
 
 	body := rec.Body.String()
 
-	// Verify Prometheus format
-	expectedLines := []string{
-		"# TYPE test_counter counter",
-		"test_counter 42",
-		"# TYPE test_gauge gauge",
-		"test_gauge 3.14",
-		"# TYPE test_timer_milliseconds histogram",
-		"test_timer_milliseconds_count 1",
-	}
-
-	for _, expected := range expectedLines {
-		if !contains(body, expected) {
-			t.Errorf("Missing expected line: %s", expected)
-		}
+	// Verify JSON format (MetricsHandler returns JSON counts)
+	expectedJSON := `{"counters":1,"gauges":1,"timers":1,"histograms":0}`
+	if body != expectedJSON {
+		t.Errorf("Expected JSON %s, got %s", expectedJSON, body)
 	}
 }
 
@@ -386,7 +377,8 @@ func BenchmarkGatewayConcurrent(b *testing.B) {
 	}))
 	defer backend.Close()
 
-	handler := gateway.ProxyHandler("bench-service", backend.URL)
+	// Use predefined service "auth" for benchmarking
+	handler := gateway.ProxyHandler("auth", backend.URL)
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {

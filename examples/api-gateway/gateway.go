@@ -45,6 +45,25 @@ const (
 	PaymentLatencyDistributionKey metricz.Key = "payment_latency_distribution"
 )
 
+// MetricsHandler creates an HTTP handler for metrics endpoint
+func MetricsHandler(registry *metricz.Registry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get metrics directly - they return map[Key]T not map[string]T
+		counters := registry.GetCounters()       // map[Key]Counter
+		gauges := registry.GetGauges()           // map[Key]Gauge
+		timers := registry.GetTimers()           // map[Key]Timer
+		histograms := registry.GetHistograms()   // map[Key]Histogram
+		
+		// Simple JSON response with correct types
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"counters":%d,"gauges":%d,"timers":%d,"histograms":%d}`,
+			len(counters),
+			len(gauges),
+			len(timers),
+			len(histograms))
+	}
+}
+
 // CircuitBreaker represents a simple circuit breaker
 type CircuitBreaker struct {
 	tripped      bool

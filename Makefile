@@ -40,7 +40,7 @@ test-examples:
 	@for dir in examples/*/; do \
 		if [ -f "$$dir/go.mod" ]; then \
 			echo "Testing $$dir"; \
-			(cd "$$dir" && go test -v -race ./...); \
+			(cd "$$dir" && go mod tidy && go test -v -race ./...); \
 		fi \
 	done
 
