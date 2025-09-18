@@ -2,14 +2,14 @@ package metricz_test
 
 import (
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/zoobzio/metricz"
-	metricstesting "github.com/zoobzio/metricz/testing"
 )
 
 func TestHistogram_Observe(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	buckets := []float64{1, 5, 10, 50, 100}
 	hist := registry.Histogram(TestHistKey, buckets)
 
@@ -43,7 +43,7 @@ func TestHistogram_Observe(t *testing.T) {
 }
 
 func TestHistogram_Buckets(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	buckets := []float64{1, 5, 10, 50, 100}
 	hist := registry.Histogram(TestHistKey, buckets)
 
@@ -102,7 +102,7 @@ func TestHistogram_BucketAssignment(t *testing.T) {
 
 	for _, tc := range cases {
 		// Create fresh registry for test isolation
-		registry := metricstesting.NewTestRegistry(t)
+		registry := metricz.New()
 		hist := registry.Histogram(TestHistKey, buckets)
 		hist.Observe(tc.value)
 
@@ -138,22 +138,26 @@ func TestHistogram_BucketAssignment(t *testing.T) {
 }
 
 func TestHistogram_ConcurrentObserve(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	buckets := []float64{1, 5, 10, 50, 100}
 	hist := registry.Histogram(TestHistKey, buckets)
 
 	const workers = 100
 	const observations = 100
 
-	// Use GenerateLoad for standardized concurrent testing
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers,
-		Operations: observations,
-		Operation: func(workerID, _ int) {
-			value := float64(workerID % 20) // Values 0-19, spread across buckets
-			hist.Observe(value)
-		},
-	})
+	// Manual concurrent testing
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for j := 0; j < observations; j++ {
+				value := float64(workerID % 20) // Values 0-19, spread across buckets
+				hist.Observe(value)
+			}
+		}(i)
+	}
+	wg.Wait()
 
 	expectedCount := uint64(workers * observations)
 	if hist.Count() != expectedCount {
@@ -173,7 +177,7 @@ func TestHistogram_ConcurrentObserve(t *testing.T) {
 }
 
 func TestHistogram_EdgeCases(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	buckets := []float64{1, 5, 10}
 	hist := registry.Histogram(TestHistKey, buckets)
 
@@ -200,7 +204,7 @@ func TestHistogram_EdgeCases(t *testing.T) {
 }
 
 func TestHistogram_EmptyBuckets(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	// Test with empty buckets array
 	hist := registry.Histogram(TestHistKey, []float64{})
 
@@ -227,7 +231,7 @@ func TestHistogram_EmptyBuckets(t *testing.T) {
 }
 
 func TestHistogram_BucketImmutability(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	originalBuckets := []float64{1, 5, 10}
 	hist := registry.Histogram(TestHistKey, originalBuckets)
 
@@ -257,7 +261,7 @@ func TestHistogram_BucketImmutability(t *testing.T) {
 }
 
 func TestHistogram_Interface(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	buckets := []float64{1, 5, 10, 50, 100}
 	var h metricz.Histogram = registry.Histogram(TestHistKey, buckets)
 
@@ -288,7 +292,7 @@ func TestHistogram_Interface(t *testing.T) {
 }
 
 func TestHistogram_RepeatedBuckets(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	// Test with duplicate bucket values
 	buckets := []float64{1, 5, 5, 10, 10, 10}
 	hist := registry.Histogram(TestHistKey, buckets)
@@ -312,7 +316,7 @@ func TestHistogram_RepeatedBuckets(t *testing.T) {
 }
 
 func TestHistogramOverflowBucket(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	h := registry.Histogram(TestHistKey, []float64{1.0, 5.0, 10.0})
 
 	// Observe values including overflow
@@ -341,7 +345,7 @@ func TestHistogramOverflowBucket(t *testing.T) {
 }
 
 func TestHistogram_Overflow(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	h := registry.Histogram(TestHistKey, []float64{1.0, 5.0, 10.0})
 
 	// Initial overflow should be zero
@@ -386,7 +390,7 @@ func TestHistogram_Overflow(t *testing.T) {
 }
 
 func TestHistogramNaNInfinityRejection(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	h := registry.Histogram(TestHistKey, []float64{1.0, 5.0, 10.0})
 
 	h.Observe(5.0)

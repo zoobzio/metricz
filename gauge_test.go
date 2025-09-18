@@ -2,14 +2,14 @@ package metricz_test
 
 import (
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/zoobzio/metricz"
-	metricstesting "github.com/zoobzio/metricz/testing"
 )
 
 func TestGauge_Set(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	// Initial value should be zero
@@ -37,7 +37,7 @@ func TestGauge_Set(t *testing.T) {
 }
 
 func TestGauge_Add(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	// Add positive value
@@ -61,7 +61,7 @@ func TestGauge_Add(t *testing.T) {
 }
 
 func TestGauge_Inc(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	// Increment from zero
@@ -85,7 +85,7 @@ func TestGauge_Inc(t *testing.T) {
 }
 
 func TestGauge_Dec(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	// Decrement from zero
@@ -109,7 +109,7 @@ func TestGauge_Dec(t *testing.T) {
 }
 
 func TestGauge_CombinedOperations(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	// Test sequence of operations
@@ -127,28 +127,45 @@ func TestGauge_CombinedOperations(t *testing.T) {
 }
 
 func TestGauge_ConcurrentAccess(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	const workers = 100
 	const operations = 100
 
-	// Use GenerateLoad with three operation types
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers * 3, // Triple workers for three operation types
-		Operations: operations,
-		Operation: func(workerID, _ int) {
-			operationType := workerID % 3
-			switch operationType {
-			case 0:
+	// Manual concurrent testing with three operation types
+	var wg sync.WaitGroup
+	// Workers that increment
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
 				gauge.Inc()
-			case 1:
+			}
+		}()
+	}
+	// Workers that decrement
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
 				gauge.Dec()
-			case 2:
+			}
+		}()
+	}
+	// Workers that add 0.5
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
 				gauge.Add(0.5)
 			}
-		},
-	})
+		}()
+	}
+	wg.Wait()
 
 	// Expected: +workers*operations -workers*operations +workers*operations*0.5
 	// = 0 + workers*operations*0.5
@@ -160,26 +177,35 @@ func TestGauge_ConcurrentAccess(t *testing.T) {
 }
 
 func TestGauge_ConcurrentSetAndRead(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	const workers = 50
 	const operations = 100
 
-	// Use GenerateLoad for both set and read operations
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers * 2, // Double workers for two operation types
-		Operations: operations,
-		Operation: func(workerID, _ int) {
-			if workerID < workers {
-				// First half sets values
+	// Manual concurrent testing with set and read operations
+	var wg sync.WaitGroup
+	// Workers that set values
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
 				gauge.Set(float64(workerID))
-			} else {
-				// Second half reads values
+			}
+		}(i)
+	}
+	// Workers that read values
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
 				_ = gauge.Value() // Just read, don't check specific value
 			}
-		},
-	})
+		}()
+	}
+	wg.Wait()
 
 	// The final value should be one of the set values (0 to workers-1)
 	final := gauge.Value()
@@ -189,7 +215,7 @@ func TestGauge_ConcurrentSetAndRead(t *testing.T) {
 }
 
 func TestGauge_LargeValues(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	// Test with large positive value
@@ -211,7 +237,7 @@ func TestGauge_LargeValues(t *testing.T) {
 }
 
 func TestGauge_SmallIncrements(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	// Test with very small increments and decrements
@@ -242,7 +268,7 @@ func TestGauge_SmallIncrements(t *testing.T) {
 }
 
 func TestGauge_Interface(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	var g metricz.Gauge = registry.Gauge(TestGaugeKey)
 
 	// Test that all interface methods work correctly
@@ -273,7 +299,7 @@ func TestGauge_Interface(t *testing.T) {
 }
 
 func TestGaugeNaNInfinityRejection(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	gauge := registry.Gauge(TestGaugeKey)
 
 	gauge.Set(5.0)

@@ -2,14 +2,14 @@ package metricz_test
 
 import (
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/zoobzio/metricz"
-	metricstesting "github.com/zoobzio/metricz/testing"
 )
 
 func TestCounter_Inc(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	// Initial value should be zero
@@ -32,7 +32,7 @@ func TestCounter_Inc(t *testing.T) {
 }
 
 func TestCounter_Add(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	// Add positive value
@@ -56,7 +56,7 @@ func TestCounter_Add(t *testing.T) {
 }
 
 func TestCounter_Add_NegativeValues(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	// Set initial value
@@ -80,20 +80,24 @@ func TestCounter_Add_NegativeValues(t *testing.T) {
 }
 
 func TestCounter_ConcurrentAccess(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	const workers = 100
 	const operations = 1000
 
-	// Use GenerateLoad for standardized concurrent testing
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers,
-		Operations: operations,
-		Operation: func(_, _ int) {
-			counter.Inc()
-		},
-	})
+	// Manual concurrent testing
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
+				counter.Inc()
+			}
+		}()
+	}
+	wg.Wait()
 
 	expected := float64(workers * operations)
 	if counter.Value() != expected {
@@ -103,25 +107,35 @@ func TestCounter_ConcurrentAccess(t *testing.T) {
 }
 
 func TestCounter_ConcurrentAddAndInc(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	const workers = 50
 	const operations = 100
 
-	// Use GenerateLoad with Setup to configure operation type per worker
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers * 2, // Double workers for two operation types
-		Operations: operations,
-		Operation: func(workerID, _ int) {
-			// First half of workers use Inc(), second half use Add(2.5)
-			if workerID < workers {
+	// Manual concurrent testing with mixed operations
+	var wg sync.WaitGroup
+	// First half of workers use Inc()
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
 				counter.Inc()
-			} else {
+			}
+		}()
+	}
+	// Second half use Add(2.5)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < operations; j++ {
 				counter.Add(2.5)
 			}
-		},
-	})
+		}()
+	}
+	wg.Wait()
 
 	// Expected: workers * operations * 1.0 + workers * operations * 2.5
 	expected := float64(workers*operations) + float64(workers*operations)*2.5
@@ -132,7 +146,7 @@ func TestCounter_ConcurrentAddAndInc(t *testing.T) {
 }
 
 func TestCounter_LargeValues(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	// Test with large float values
@@ -155,7 +169,7 @@ func TestCounter_LargeValues(t *testing.T) {
 }
 
 func TestCounter_SmallIncrements(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	// Test with very small increments
@@ -182,7 +196,7 @@ func TestCounter_SmallIncrements(t *testing.T) {
 }
 
 func TestCounter_Interface(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	var c metricz.Counter = registry.Counter(TestCounterKey)
 
 	// Test that the interface methods work correctly
@@ -204,7 +218,7 @@ func TestCounter_Interface(t *testing.T) {
 }
 
 func TestCounterNaNInfinityRejection(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	counter := registry.Counter(TestCounterKey)
 
 	counter.Add(5.0)

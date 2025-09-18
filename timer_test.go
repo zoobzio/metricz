@@ -1,16 +1,16 @@
 package metricz_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zoobzio/clockz"
 	"github.com/zoobzio/metricz"
-	metricstesting "github.com/zoobzio/metricz/testing"
 )
 
 func TestTimer_Record(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	timer := registry.Timer(TestTimerKey)
 
 	// Initial state
@@ -38,7 +38,7 @@ func TestTimer_Record(t *testing.T) {
 }
 
 func TestTimer_RecordMultiple(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	timer := registry.Timer(TestTimerKey)
 
 	// Record multiple durations
@@ -66,7 +66,7 @@ func TestTimer_RecordMultiple(t *testing.T) {
 
 func TestTimer_Start_Stop(t *testing.T) {
 	clock := clockz.NewFakeClock()
-	registry := metricstesting.NewTestRegistryWithClock(t, clock)
+	registry := metricz.New().WithClock(clock)
 	timer := registry.Timer(TestTimerKey)
 
 	// Start timing
@@ -92,7 +92,7 @@ func TestTimer_Start_Stop(t *testing.T) {
 
 func TestTimer_MultipleStopwatches(t *testing.T) {
 	clock := clockz.NewFakeClock()
-	registry := metricstesting.NewTestRegistryWithClock(t, clock)
+	registry := metricz.New().WithClock(clock)
 	timer := registry.Timer(TestTimerKey)
 
 	const numStopwatches = 5
@@ -128,7 +128,7 @@ func TestTimer_MultipleStopwatches(t *testing.T) {
 }
 
 func TestTimer_Buckets(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	timer := registry.Timer(TestTimerKey)
 
 	// Record some durations that should fall in different buckets
@@ -164,21 +164,25 @@ func TestTimer_Buckets(t *testing.T) {
 }
 
 func TestTimer_ConcurrentRecording(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	timer := registry.Timer(TestTimerKey)
 
 	const workers = 50
 	const recordings = 10
 
-	// Use GenerateLoad for standardized concurrent testing
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers,
-		Operations: recordings,
-		Operation: func(_, opID int) {
-			duration := time.Duration(opID+1) * time.Millisecond
-			timer.Record(duration)
-		},
-	})
+	// Manual concurrent testing
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(_ int) {
+			defer wg.Done()
+			for j := 0; j < recordings; j++ {
+				duration := time.Duration(j+1) * time.Millisecond
+				timer.Record(duration)
+			}
+		}(i)
+	}
+	wg.Wait()
 
 	expectedCount := uint64(workers * recordings)
 	if timer.Count() != expectedCount {
@@ -193,24 +197,26 @@ func TestTimer_ConcurrentRecording(t *testing.T) {
 
 func TestTimer_ConcurrentStartStop(t *testing.T) {
 	clock := clockz.NewFakeClock()
-	registry := metricstesting.NewTestRegistryWithClock(t, clock)
+	registry := metricz.New().WithClock(clock)
 	timer := registry.Timer(TestTimerKey)
 
 	const workers = 20
 
-	// Use GenerateLoad for Start/Stop pattern testing
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers,
-		Operations: 1, // One Start/Stop per worker
-		Operation: func(workerID, _ int) {
+	// Manual concurrent testing for Start/Stop pattern
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
 			stopwatch := timer.Start()
 			// Record a duration based on worker ID for deterministic results
 			duration := time.Duration(workerID+1) * time.Millisecond
 			timer.Record(duration)
 			// Also test Stop functionality without clock advancement
 			stopwatch.Stop() // This will record 0ms since no time elapsed
-		},
-	})
+		}(i)
+	}
+	wg.Wait()
 
 	if timer.Count() != workers*2 { // Each worker records twice: once via Record, once via Stop
 		t.Errorf("Expected count %d, got %d", workers*2, timer.Count())
@@ -224,7 +230,7 @@ func TestTimer_ConcurrentStartStop(t *testing.T) {
 }
 
 func TestTimer_NanosecondPrecision(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	timer := registry.Timer(TestTimerKey)
 
 	// Test very short duration
@@ -239,7 +245,7 @@ func TestTimer_NanosecondPrecision(t *testing.T) {
 }
 
 func TestTimer_LargeDurations(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	timer := registry.Timer(TestTimerKey)
 
 	// Test large duration
@@ -254,7 +260,7 @@ func TestTimer_LargeDurations(t *testing.T) {
 }
 
 func TestTimer_ZeroDuration(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	timer := registry.Timer(TestTimerKey)
 
 	// Test zero duration
@@ -271,7 +277,7 @@ func TestTimer_ZeroDuration(t *testing.T) {
 
 func TestStopwatch_MultipleStops(t *testing.T) {
 	clock := clockz.NewFakeClock()
-	registry := metricstesting.NewTestRegistryWithClock(t, clock)
+	registry := metricz.New().WithClock(clock)
 	timer := registry.Timer(TestTimerKey)
 
 	stopwatch := timer.Start()
@@ -306,7 +312,7 @@ func TestStopwatch_MultipleStops(t *testing.T) {
 
 func TestTimer_Interface(t *testing.T) {
 	clock := clockz.NewFakeClock()
-	registry := metricstesting.NewTestRegistryWithClock(t, clock)
+	registry := metricz.New().WithClock(clock)
 	var tm metricz.Timer = registry.Timer(TestTimerKey)
 
 	// Test interface methods

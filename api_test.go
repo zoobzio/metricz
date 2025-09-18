@@ -1,11 +1,11 @@
 package metricz_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/zoobzio/metricz"
-	metricstesting "github.com/zoobzio/metricz/testing"
 )
 
 // Test keys for all metricz tests (shared across test files).
@@ -45,7 +45,7 @@ func TestKey_String(t *testing.T) {
 }
 
 func TestRegistry_Counter(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 
 	// First call creates counter
 	counter1 := registry.Counter(TestCounterKey)
@@ -67,7 +67,7 @@ func TestRegistry_Counter(t *testing.T) {
 }
 
 func TestRegistry_Gauge(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 
 	// First call creates gauge
 	gauge1 := registry.Gauge(TestGaugeKey)
@@ -89,7 +89,7 @@ func TestRegistry_Gauge(t *testing.T) {
 }
 
 func TestRegistry_Histogram(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	buckets := []float64{1, 5, 10, 50, 100}
 
 	// First call creates histogram
@@ -112,7 +112,7 @@ func TestRegistry_Histogram(t *testing.T) {
 }
 
 func TestRegistry_Timer(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 
 	// First call creates timer
 	timer1 := registry.Timer(TestTimerKey)
@@ -134,7 +134,7 @@ func TestRegistry_Timer(t *testing.T) {
 }
 
 func TestRegistry_TimerWithBuckets(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 	customBuckets := []float64{1, 10, 100, 1000}
 
 	// First call creates timer with custom buckets
@@ -179,7 +179,7 @@ func TestRegistry_TimerWithBuckets(t *testing.T) {
 }
 
 func TestRegistry_Reset(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 
 	// Use keys from metricz package - these are already defined as constants
 
@@ -213,7 +213,7 @@ func TestRegistry_Reset(t *testing.T) {
 }
 
 func TestRegistry_ConcurrentAccess(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 
 	// Use keys from metricz package
 	// Key constants are already defined in metricz package
@@ -221,14 +221,18 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 	const workers = 100
 	const iterations = 100
 
-	// Use GenerateLoad for concurrent counter access
-	metricstesting.GenerateLoad(t, metricstesting.LoadConfig{
-		Workers:    workers,
-		Operations: iterations,
-		Operation: func(_, _ int) {
-			registry.Counter(ConcurrentCounterKey).Inc()
-		},
-	})
+	// Manual concurrent testing
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				registry.Counter(ConcurrentCounterKey).Inc()
+			}
+		}()
+	}
+	wg.Wait()
 
 	expected := float64(workers * iterations)
 	if registry.Counter(ConcurrentCounterKey).Value() != expected {
@@ -255,8 +259,8 @@ func TestRegistry_ConcurrentAccess(t *testing.T) {
 
 func TestRegistry_InstanceIsolation(t *testing.T) {
 	// Create two separate registries
-	registry1 := metricstesting.NewTestRegistry(t)
-	registry2 := metricstesting.NewTestRegistry(t)
+	registry1 := metricz.New()
+	registry2 := metricz.New()
 
 	// Isolation test key
 	// Use existing test key from metricz package
@@ -276,7 +280,7 @@ func TestRegistry_InstanceIsolation(t *testing.T) {
 }
 
 func TestRegistry_KeyTypeEnforcement(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 
 	// Test that Key constants work correctly
 	const RequestsKey metricz.Key = "requests"
@@ -302,7 +306,7 @@ func TestRegistry_KeyTypeEnforcement(t *testing.T) {
 }
 
 func TestRegistry_KeyVariables(t *testing.T) {
-	registry := metricstesting.NewTestRegistry(t)
+	registry := metricz.New()
 
 	// Test Key variables (the recommended pattern)
 	var (

@@ -9,7 +9,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/zoobzio/metricz)](go.mod)
 [![Release](https://img.shields.io/github/v/release/zoobzio/metricz)](https://github.com/zoobzio/metricz/releases)
 
-Zero-dependency metrics collection for Go applications that prevents runtime key errors through compile-time type safety.
+High-performance metrics collection library for Go with compile-time safety and zero dependencies.
 
 ## Quick Start
 
@@ -17,172 +17,205 @@ Zero-dependency metrics collection for Go applications that prevents runtime key
 package main
 
 import (
+    "fmt"
     "time"
     "github.com/zoobzio/metricz"
 )
 
-// Define metric keys as compile-time constants
+// Define metrics as constants
 const (
-    RequestsTotal metricz.Key = "requests_total"
-    RequestLatency metricz.Key = "request_latency"
-    ActiveUsers metricz.Key = "active_users"
+    RequestCount = metricz.Key("http_requests_total")
+    ResponseTime = metricz.Key("http_response_duration_ms")
+    ActiveConns  = metricz.Key("active_connections")
 )
 
 func main() {
-    // Create isolated registry instance
-    registry := metricz.New()
+    // Create isolated registry
+    metrics := metricz.New()
     
-    // Use typed keys - no raw strings allowed
-    counter := registry.Counter(RequestsTotal)
-    timer := registry.Timer(RequestLatency)
-    gauge := registry.Gauge(ActiveUsers)
+    // Use typed metrics
+    counter := metrics.Counter(RequestCount)
+    timer := metrics.Timer(ResponseTime)
+    gauge := metrics.Gauge(ActiveConns)
     
-    // Record metrics
+    // Thread-safe operations
     counter.Inc()
-    stopwatch := timer.Start()
-    time.Sleep(10 * time.Millisecond)
-    stopwatch.Stop()
-    gauge.Set(42)
+    counter.Add(5)
     
-    // Values are immediately available
-    println("Requests:", counter.Value())
-    println("Users:", gauge.Value())
+    gauge.Set(10)
+    gauge.Inc()
+    
+    stopwatch := timer.Start()
+    time.Sleep(100 * time.Millisecond)
+    stopwatch.Stop()
+    
+    fmt.Printf("Requests: %.0f\n", counter.Value())
+    fmt.Printf("Connections: %.0f\n", gauge.Value())
+    fmt.Printf("Response time samples: %d\n", timer.Count())
 }
 ```
 
-## Why This Exists
+## Core Features
 
-Most Go metrics libraries accept raw strings for metric names, creating runtime errors from typos and making refactoring dangerous. When you rename a metric, every string reference must be manually found and updated - miss one and you lose data silently.
+### Performance
+- **Sub-microsecond operations**: Atomic operations for metric updates
+- **Zero allocations**: No memory allocations in steady-state operation
+- **Lock-free updates**: Uses atomic operations for value changes
+- **Minimal overhead**: Direct atomic access without intermediate layers
 
-metricz solves this through the `Key` type:
-- **Compile-time safety**: Typos become compile errors, not silent data loss
-- **Refactoring confidence**: Rename a key constant and all usages update automatically  
-- **Zero runtime overhead**: Keys are just strings internally
-- **Complete isolation**: Each registry is independent with no global state
+### Thread Safety
+- All metric operations are thread-safe
+- Multiple goroutines can update same metrics concurrently
+- Registry operations use efficient read-write mutexes
+- No external synchronization required
 
-## Key Features
+### Registry Isolation
+- Each registry maintains completely isolated metrics
+- No global state or singleton patterns
+- Multiple registries can coexist without interference
+- Perfect for multi-tenant or component isolation
 
-- **Type-safe metric keys**: No raw strings - all keys must be `metricz.Key` constants
-- **Instance isolation**: Multiple registries with independent metric namespaces
-- **Thread-safe operations**: All metrics support concurrent access without external locking
-- **Zero dependencies**: Pure Go implementation with no external requirements
-- **Comprehensive metric types**: Counters, Gauges, Histograms, and Timers with sensible defaults
+### Compile-Time Safety
+- All metrics require explicit Key type declaration
+- Typos in metric names become compile errors
+- No raw strings accepted by the API
+- Consistent naming enforced at compile time
 
-## Installation
+## API Reference
 
-```bash
-go get github.com/zoobzio/metricz
+### Registry
+
+Create and manage metric collections:
+
+```go
+// Create new registry
+registry := metricz.New()
+
+// Get or create metrics
+counter := registry.Counter(key)
+gauge := registry.Gauge(key)
+histogram := registry.Histogram(key, buckets)
+timer := registry.Timer(key)
+
+// Reset all metrics (useful for testing)
+registry.Reset()
+
+// Export metrics
+counters := registry.GetCounters()
+gauges := registry.GetGauges()
+histograms := registry.GetHistograms()
+timers := registry.GetTimers()
 ```
-
-## Metric Types
 
 ### Counter
-Monotonically increasing values that only go up:
+
+Monotonically increasing values:
 
 ```go
-const RequestsProcessed metricz.Key = "requests_processed"
+const RequestsTotal = metricz.Key("requests_total")
 
-counter := registry.Counter(RequestsProcessed)
-counter.Inc()           // Add 1
-counter.Add(5.0)        // Add 5
-value := counter.Value() // Get current total
+counter := registry.Counter(RequestsTotal)
+counter.Inc()        // Increment by 1
+counter.Add(5.5)     // Add positive value
+value := counter.Value() // Read current value
 ```
 
-### Gauge  
-Values that can increase and decrease:
+### Gauge
+
+Values that can increase or decrease:
 
 ```go
-const QueueDepth metricz.Key = "queue_depth"
+const QueueSize = metricz.Key("queue_size")
 
-gauge := registry.Gauge(QueueDepth)
-gauge.Set(10.0)    // Set absolute value
-gauge.Inc()        // Increment by 1
-gauge.Dec()        // Decrement by 1
-gauge.Add(-3.0)    // Add/subtract any value
-value := gauge.Value() // Get current value
+gauge := registry.Gauge(QueueSize)
+gauge.Set(100)      // Set to specific value
+gauge.Inc()         // Increment by 1
+gauge.Dec()         // Decrement by 1
+gauge.Add(10)       // Add value (can be negative)
+value := gauge.Value() // Read current value
 ```
 
 ### Histogram
-Distribution tracking with configurable buckets:
+
+Track value distributions:
 
 ```go
-const ResponseSize metricz.Key = "response_size_bytes"
+const ResponseSize = metricz.Key("response_size_bytes")
 
-// Custom buckets for response sizes
+// Define bucket boundaries
 buckets := []float64{100, 500, 1000, 5000, 10000}
-histogram := registry.Histogram(ResponseSize, buckets)
+hist := registry.Histogram(ResponseSize, buckets)
 
-histogram.Observe(1500.0) // Record observation
-sum := histogram.Sum()    // Total of all observations
-count := histogram.Count() // Number of observations
+// Record observations
+hist.Observe(756.5)
+hist.Observe(1234.0)
+
+// Read statistics
+buckets, counts := hist.Buckets() // Get distribution
+sum := hist.Sum()                  // Total of all observations
+count := hist.Count()              // Number of observations
+overflow := hist.Overflow()        // Count exceeding largest bucket
 ```
 
 ### Timer
-Duration tracking built on histograms:
+
+Measure durations with built-in histogram:
 
 ```go
-const DatabaseLatency metricz.Key = "database_latency"
+const ProcessingTime = metricz.Key("processing_time_ms")
 
-timer := registry.Timer(DatabaseLatency)
+timer := registry.Timer(ProcessingTime)
 
-// Manual timing
-timer.Record(150 * time.Millisecond)
-
-// Automatic timing with stopwatch
+// Method 1: Stopwatch pattern
 stopwatch := timer.Start()
 // ... do work ...
-stopwatch.Stop() // Automatically records duration
+stopwatch.Stop()
 
-// Access histogram data
-sum := timer.Sum()    // Total milliseconds
-count := timer.Count() // Number of operations
+// Method 2: Direct recording
+timer.Record(150 * time.Millisecond)
+
+// Custom buckets (in milliseconds)
+buckets := []float64{1, 5, 10, 50, 100, 500, 1000}
+timer := registry.TimerWithBuckets(ProcessingTime, buckets)
+
+// Read statistics
+count := timer.Count()             // Number of recordings
+sum := timer.Sum()                 // Total duration in milliseconds
+buckets, counts := timer.Buckets() // Distribution
 ```
 
-## The Key Type Requirement
+## Export for Monitoring Systems
 
-**Critical**: All metric operations require `metricz.Key` type - raw strings are rejected at compile time.
-
-### Right Way - Define Constants
+All registries provide export methods for Prometheus, StatsD, or custom monitoring:
 
 ```go
-// Define all keys as constants for compile-time safety
-const (
-    UserRegistrations metricz.Key = "user_registrations"
-    LoginAttempts     metricz.Key = "login_attempts" 
-    SessionDuration   metricz.Key = "session_duration"
-)
-
-func trackUserActivity(registry *metricz.Registry) {
-    registry.Counter(UserRegistrations).Inc()
-    registry.Timer(SessionDuration).Record(5 * time.Minute)
+func exportMetrics(registry *metricz.Registry) {
+    // Get all metrics as maps with string keys
+    counters := registry.GetCounters()
+    gauges := registry.GetGauges() 
+    histograms := registry.GetHistograms()
+    timers := registry.GetTimers()
+    
+    // Export to your monitoring system
+    for name, counter := range counters {
+        prometheus.CounterVec.WithLabelValues(name).Set(counter.Value())
+    }
 }
 ```
 
-### Wrong Way - Raw Strings (Won't Compile)
+## Error Handling
+
+metricz validates all inputs and ignores invalid values rather than panicking:
 
 ```go
-// This will cause compile errors
-func badExample(registry *metricz.Registry) {
-    registry.Counter("user_registrations").Inc() // ❌ Compile error
-    registry.Timer("session_duration").Record(5 * time.Minute) // ❌ Compile error
-}
-```
+counter.Add(-1.0)         // Ignored - counters can't decrease
+counter.Add(math.NaN())   // Ignored - invalid value
+counter.Add(math.Inf(1))  // Ignored - invalid value
 
-### Why This Matters
+gauge.Set(math.NaN())     // Ignored - invalid value
 
-```go
-// With string-based libraries - silent bugs
-requests := registry.Counter("http_requests_total")
-requests.Inc()
-
-// Later, typo creates new metric instead of updating existing
-reqs := registry.Counter("http_request_total") // Missing 's' - creates new metric!
-reqs.Inc() // Data goes to wrong metric
-
-// With metricz - compile errors prevent bugs  
-const HTTPRequestsTotal metricz.Key = "http_requests_total"
-requests := registry.Counter(HTTPRequestsTotal)
-reqs := registry.Counter(HTTPRequestsTotal) // Same constant - same metric guaranteed
+histogram.Observe(math.NaN())  // Ignored - invalid value
+histogram.Observe(math.Inf(1)) // Ignored - invalid value
 ```
 
 ## Registry Patterns
@@ -225,120 +258,74 @@ func multiServiceExample() {
 }
 ```
 
-## Export for Monitoring Systems
+## Installation
 
-All registries provide export methods for Prometheus, StatsD, or custom monitoring:
-
-```go
-func exportMetrics(registry *metricz.Registry) {
-    // Get all metrics as maps with string keys
-    counters := registry.GetCounters()
-    gauges := registry.GetGauges() 
-    histograms := registry.GetHistograms()
-    timers := registry.GetTimers()
-    
-    // Export to your monitoring system
-    for name, counter := range counters {
-        prometheus.CounterVec.WithLabelValues(name).Set(counter.Value())
-    }
-}
+```bash
+go get github.com/zoobzio/metricz
 ```
-
-## Error Handling
-
-metricz validates all inputs and ignores invalid values rather than panicking:
-
-```go
-counter.Add(-1.0)         // Ignored - counters can't decrease
-counter.Add(math.NaN())   // Ignored - invalid value
-counter.Add(math.Inf(1))  // Ignored - invalid value
-
-gauge.Set(math.NaN())     // Ignored - invalid value  
-timer.Record(-time.Second) // Ignored - negative duration
-```
-
-## Thread Safety
-
-All operations are thread-safe without external locking:
-
-```go
-const WorkerMetric metricz.Key = "worker_operations"
-
-func workerExample() {
-    registry := metricz.New()
-    counter := registry.Counter(WorkerMetric)
-    
-    // Safe to call from multiple goroutines
-    for i := 0; i < 100; i++ {
-        go func() {
-            counter.Inc() // Thread-safe increment
-        }()
-    }
-}
-```
-
-## Examples
-
-See the [examples/](examples/) directory for complete applications:
-
-- **[batch-processor/](examples/batch-processor/)** - Comprehensive batch processing with stage metrics, failure tracking, and performance analysis
-- **[api-gateway/](examples/api-gateway/)** - HTTP API with request tracking, latency monitoring, and error analysis  
-- **[service-mesh/](examples/service-mesh/)** - Microservice communication with circuit breakers and load balancing metrics
-- **[worker-pool/](examples/worker-pool/)** - Concurrent job processing with worker utilization and queue depth tracking
 
 ## Design Decisions
 
-### Why Key Type Instead of Strings?
+### Key Type Enforcement
 
-String-based metrics lead to typos, silent failures, and refactoring dangers. The `Key` type provides compile-time verification with zero runtime cost.
+The library enforces use of the `Key` type rather than raw strings to prevent metric naming errors that commonly occur in production systems. This design decision catches typos and naming inconsistencies at compile time rather than runtime.
 
-### Why Registry Struct Not Interface?
+```go
+// Constants force consistent naming
+const RequestCount = metricz.Key("requests_total")
 
-Concrete structs are faster, simpler to use, and avoid interface boxing overhead. The registry API is stable and doesn't require multiple implementations.
-
-### Why No Global Registry?
-
-Global state creates dependency injection problems, testing complications, and prevents service isolation. Explicit registries make dependencies clear and testing straightforward.
-
-### Why No Metric Labels/Tags?
-
-Labels multiply cardinality and can cause memory issues. For high-cardinality data, use multiple registries or separate keys. This keeps the library simple and predictable.
-
-## Performance
-
-Measured on AMD Ryzen 5 3600X, Go 1.23.2:
-
-| Operation | Time | Memory |
-|-----------|------|--------|
-| Counter.Inc() | 4.6ns | 0 allocs |
-| Gauge.Set() | 5.0ns | 0 allocs |
-| Histogram.Observe() | 30.6ns | 0 allocs |
-
-Real-world HTTP tracking: 200ns with 32B allocation (request metadata).
-
-### Key Characteristics
-- **Zero allocation updates**: All metric operations allocate 0 bytes after creation
-- **Lock-free reads**: Value() operations never block or wait
-- **Atomic operations**: Minimal contention even with 100+ concurrent writers
-- **Constant time lookup**: Registry operations in O(1) time
-
-### Verify Performance
-```bash
-# Core operations
-go test -bench="Counter_Inc$|Gauge_Set$|Histogram_Observe$" -benchmem ./testing/benchmarks/
-
-# Real usage pattern  
-go test -bench=BenchmarkHTTPRequestTracking -benchmem ./testing/benchmarks/
+// Compiler enforces correct usage
+registry.Counter(RequestCount)     // ✓ Compiles
+registry.Counter("requests_total") // ✗ Won't compile
 ```
 
-See [testing/benchmarks/](testing/benchmarks/) for comprehensive performance analysis.
+### Registry Isolation
 
-## Documentation
+Each registry maintains completely isolated state to prevent metric collisions in complex applications. This allows different components or teams to maintain their own metrics without coordination.
 
-- [API Documentation](https://pkg.go.dev/github.com/zoobzio/metricz) - Complete API reference
-- [Examples](examples/) - Working applications showing real-world usage
-- [Architecture](docs/architecture.md) - Design decisions and trade-offs  
-- [Testing](testing/) - Integration and reliability tests
+### Atomic Operations
+
+The library uses atomic operations (sync/atomic) for all metric value updates to achieve lock-free performance in hot paths. This provides sub-microsecond update times with zero lock contention.
+
+### Zero Dependencies
+
+Metricz depends only on the Go standard library (sync and time packages) to maximize compatibility and minimize security surface area. The optional clockz dependency enables deterministic testing.
+
+### Bucket Design
+
+Histograms and timers use pre-defined buckets rather than computing quantiles to maintain predictable memory usage and consistent performance regardless of observation count.
+
+### No Global Registry
+
+Global state creates dependency injection problems, testing complications, and prevents service isolation. Explicit registries make dependencies clear and testing straightforward. Each registry maintains complete isolation:
+
+```go
+// Clear dependency management
+type Service struct {
+    metrics *metricz.Registry
+}
+
+// Easy testing with fresh registries
+func TestServiceMetrics(t *testing.T) {
+    registry := metricz.New()
+    // Test in isolation
+}
+```
+
+### No Metric Labels/Tags
+
+Labels multiply cardinality and can cause memory issues in production. For high-cardinality data, use multiple registries or separate keys. This design keeps the library simple, predictable, and prevents unbounded memory growth:
+
+```go
+// Instead of labels
+// metric{service="api", method="GET", endpoint="/users"}
+
+// Use explicit keys or separate registries
+const (
+    APIGetUsers  = metricz.Key("api_get_users")
+    APIPostUsers = metricz.Key("api_post_users")
+)
+```
 
 ## Compatibility
 

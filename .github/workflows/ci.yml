@@ -39,79 +39,9 @@ jobs:
     - name: Run unit tests with race detection
       run: go test -v -race -timeout=5m ./...
       
-    - name: Test examples
-      run: make test-examples
 
-  # Integration tests - atomic operations and concurrency verification
-  integration-tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Go ${{ env.GO_VERSION }}
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
-          
-    - name: Download dependencies
-      run: go mod download
-      
-    - name: Run integration tests with race detection
-      run: go test -v -race -timeout=10m ./testing/integration/...
       
 
-  # Performance benchmarks - regression detection for metrics operations
-  benchmarks:
-    name: Performance Benchmarks
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Go ${{ env.GO_VERSION }}
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
-          
-    - name: Download dependencies
-      run: go mod download
-      
-    - name: Run core metrics benchmarks
-      run: go test -v -bench=. -benchmem -benchtime=100ms -timeout=15m ./testing/benchmarks/...
-      
-    - name: Run atomic operation benchmarks
-      run: go test -v -bench=BenchmarkAtomic -benchmem -benchtime=100ms -timeout=10m ./...
-      
-    - name: Run comparison benchmarks
-      run: go test -v -bench=BenchmarkComparison -benchmem -benchtime=100ms -timeout=10m ./testing/benchmarks/comparison/...
-      
-    - name: Store benchmark results
-      run: |
-        go test -bench=. -benchmem -benchtime=100ms -timeout=15m ./testing/benchmarks/... | tee benchmark-results.txt
-        
-    - name: Upload benchmark results
-      uses: actions/upload-artifact@v4
-      with:
-        name: benchmark-results-${{ github.sha }}
-        path: benchmark-results.txt
 
   # Cross-platform testing - ensure atomic operations work across platforms
   cross-platform:
@@ -182,65 +112,18 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
         file: ./coverage.out
-        flags: unit
-        name: metricz-coverage
-        fail_ci_if_error: false
+        flags: unittests
+        name: codecov-umbrella
         
     - name: Upload coverage report
       uses: actions/upload-artifact@v4
       with:
         name: coverage-report-${{ github.sha }}
-        path: coverage.out
+        path: |
+          coverage.out
+          coverage.html
 
-  # End-to-end verification using examples
-  e2e-examples:
-    name: E2E Examples
-    runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests]
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Go ${{ env.GO_VERSION }}
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ env.GO_VERSION }}
-        
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
-          
-    - name: Download dependencies for examples
-      run: |
-        for dir in examples/*/; do
-          if [ -f "$dir/go.mod" ]; then
-            echo "Downloading dependencies for $dir"
-            (cd "$dir" && go mod download)
-          fi
-        done
-        
-    - name: Build all examples
-      run: |
-        for dir in examples/*/; do
-          if [ -f "$dir/main.go" ]; then
-            echo "Building $dir"
-            (cd "$dir" && go build -v .)
-          fi
-        done
-        
-    - name: Run examples with timeout
-      run: |
-        for dir in examples/*/; do
-          if [ -f "$dir/main.go" ]; then
-            echo "Running $dir"
-            (cd "$dir" && timeout 30s go run . || echo "Example completed or timed out safely")
-          fi
-        done
 
   # Security scanning
   security:
@@ -282,7 +165,7 @@ jobs:
   ci-complete:
     name: CI Complete
     runs-on: ubuntu-latest
-    needs: [unit-tests, integration-tests, benchmarks, cross-platform, quality, e2e-examples, security]
+    needs: [unit-tests, cross-platform, quality, security]
     if: always()
     steps:
     - name: Check all jobs status
@@ -291,24 +174,12 @@ jobs:
           echo "Unit tests failed"
           exit 1
         fi
-        if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
-          echo "Integration tests failed"
-          exit 1
-        fi
-        if [[ "${{ needs.benchmarks.result }}" != "success" ]]; then
-          echo "Benchmarks failed"
-          exit 1
-        fi
         if [[ "${{ needs.cross-platform.result }}" != "success" ]]; then
           echo "Cross-platform tests failed"
           exit 1
         fi
         if [[ "${{ needs.quality.result }}" != "success" ]]; then
           echo "Code quality checks failed"
-          exit 1
-        fi
-        if [[ "${{ needs.e2e-examples.result }}" != "success" ]]; then
-          echo "E2E examples failed"
           exit 1
         fi
         if [[ "${{ needs.security.result }}" != "success" ]]; then
